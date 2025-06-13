@@ -5,8 +5,10 @@ import sys
 def show_main_menu(screen, WIDTH, HEIGHT):
     font = pygame.font.SysFont(None, 72)
     small_font = pygame.font.SysFont(None, 36)
-    title_surf = font.render("Drift City", True, (255, 255, 0))
-    prompt_surf = small_font.render("Press any key to start", True, (255, 255, 255))
+    title_surf = font.render("Project Drift City", True, (255, 255, 0))
+    prompt_surf = small_font.render("Press any key or click Start Game", True, (255, 255, 255))  # <-- Add this line
+    button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 60, 200, 50)
+    button_text = small_font.render("Start Game", True, (80, 80, 80))
     clock = pygame.time.Clock()
 
     while True:
@@ -15,11 +17,19 @@ def show_main_menu(screen, WIDTH, HEIGHT):
                 pygame.quit()
                 sys.exit()
             elif event.type in [pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN]:
-                return  # Start the game
+                # If mouse click, check if it's on the button
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if button_rect.collidepoint(event.pos):
+                        return  # Start the game
+                else:
+                    return  # Start the game on any key
 
         screen.fill((30, 30, 30))
         screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, HEIGHT // 2 - 100))
         screen.blit(prompt_surf, (WIDTH // 2 - prompt_surf.get_width() // 2, HEIGHT // 2 + 20))
+        # Draw the Start Game button
+        pygame.draw.rect(screen, (255, 220, 100), button_rect, border_radius=12)
+        screen.blit(button_text, (button_rect.centerx - button_text.get_width() // 2, button_rect.centery - button_text.get_height() // 2))
         pygame.display.flip()
         clock.tick(60)
 
@@ -29,13 +39,41 @@ def tint_surface(surface, tint_color):
     tinted.fill(tint_color + (0,), None, pygame.BLEND_RGBA_MULT)
     return tinted
 
+def draw_pause_button(surface, rect, paused):
+    color = (200, 200, 200) if not paused else (255, 220, 100)
+    pygame.draw.rect(surface, color, rect, border_radius=8)
+    if not paused:
+        pygame.draw.rect(surface, (80, 80, 80), rect.inflate(-24, -8).move(6, 0))
+        pygame.draw.rect(surface, (80, 80, 80), rect.inflate(-24, -8).move(-6, 0))
+    else:
+        points = [
+            (rect.left + 12, rect.top + 8),
+            (rect.left + 12, rect.bottom - 8),
+            (rect.right - 8, rect.centery)
+        ]
+        pygame.draw.polygon(surface, (80, 80, 80), points)
+
+def save_highscore(score, filename="highscore.txt"):
+    try:
+        with open(filename, "w") as f:
+            f.write(str(score))
+    except Exception as e:
+        print("Error saving highscore:", e)
+
+def load_highscore(filename="highscore.txt"):
+    try:
+        with open(filename, "r") as f:
+            return int(f.read())
+    except:
+        return 0
+
 def main():
     pygame.init()
 
     # Screen settings
     WIDTH, HEIGHT = 800, 600
     screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
-    pygame.display.set_caption("Top-Down Drift City with Joycon")
+    pygame.display.set_caption("Project Drift City")
 
     clock = pygame.time.Clock()
     FPS = 60
@@ -46,7 +84,7 @@ def main():
 
     # Load car image
     car_image = pygame.image.load("car_sprite.png").convert_alpha()
-    car_image = pygame.transform.scale(car_image, (40, 60))  # Shorter car
+    car_image = pygame.transform.scale(car_image, (35, 45))  # Shorter car
 
     # Car class
     class Car:
@@ -144,6 +182,30 @@ def main():
         # Add more as needed, coordinates are in map space
     ]
 
+    pause_button_rect = pygame.Rect(10, 10, 40, 40)
+    paused = False
+    back_button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 + 60, 200, 50)
+
+    # Draw pause menu overlay if paused
+    if paused:
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 120))
+        screen.blit(overlay, (0, 0))
+        font = pygame.font.SysFont(None, 72)
+        pause_text = font.render("Paused", True, (255, 255, 0))
+        screen.blit(pause_text, (WIDTH // 2 - pause_text.get_width() // 2, HEIGHT // 2 - 60))
+        small_font = pygame.font.SysFont(None, 36)
+        info = small_font.render("Click pause button to resume", True, (255, 255, 255))
+        screen.blit(info, (WIDTH // 2 - info.get_width() // 2, HEIGHT // 2 + 10))
+
+        # Draw "Back to Main Menu" button
+        pygame.draw.rect(screen, (255, 220, 100), back_button_rect, border_radius=12)
+        btn_text = small_font.render("Back to Main Menu", True, (80, 80, 80))
+        screen.blit(btn_text, (back_button_rect.centerx - btn_text.get_width() // 2, back_button_rect.centery - btn_text.get_height() // 2))
+
+    # Load highscore
+    highscore = load_highscore()
+
     # Game loop
     running = True
     while running:
@@ -152,12 +214,27 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type in [pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION]:
-                joycon.handle_event(event)
+            elif event.type in [pygame.MOUSEBUTTONDOWN]:
+                if pause_button_rect.collidepoint(event.pos):
+                    paused = not paused
+                elif paused and back_button_rect.collidepoint(event.pos):
+                    # Save highscore before returning to menu
+                    if player_car.score > highscore:
+                        save_highscore(player_car.score)
+                        highscore = player_car.score
+                    show_main_menu(screen, WIDTH, HEIGHT)
+                    paused = False
+                else:
+                    if not paused:
+                        joycon.handle_event(event)
+            elif event.type in [pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION]:
+                if not paused:
+                    joycon.handle_event(event)
 
-        # Update car
-        drive_vector = joycon.get_vector()
-        player_car.update(drive_vector)
+        if not paused:
+            # Update car
+            drive_vector = joycon.get_vector()
+            player_car.update(drive_vector)
 
         # Camera offset (no clamping, allows infinite scrolling)
         offset_x = player_car.x - WIDTH // 2
@@ -174,10 +251,36 @@ def main():
         player_car.draw(screen, offset_x, offset_y)
         joycon.draw(screen)
 
-        # --- Draw score ---
+        # --- Draw score and highscore ---
         font = pygame.font.SysFont(None, 36)
         score_surf = font.render(f"Score: {player_car.score}", True, (255, 255, 0))
-        screen.blit(score_surf, (20, 20))
+        screen.blit(score_surf, (pause_button_rect.right + 10, pause_button_rect.top + (pause_button_rect.height - score_surf.get_height()) // 2))
+        highscore_surf = font.render(f"High Score: {highscore}", True, (255, 255, 255))
+        screen.blit(highscore_surf, (pause_button_rect.right + 10, pause_button_rect.bottom + 10))
+
+        # Draw pause button
+        draw_pause_button(screen, pause_button_rect, paused)
+
+        # Draw pause menu overlay if paused
+        if paused:
+            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 120))
+            screen.blit(overlay, (0, 0))
+            font = pygame.font.SysFont(None, 72)
+            pause_text = font.render("Paused", True, (255, 255, 0))
+            screen.blit(pause_text, (WIDTH // 2 - pause_text.get_width() // 2, HEIGHT // 2 - 60))
+            small_font = pygame.font.SysFont(None, 36)
+            info = small_font.render("Click pause button to resume", True, (255, 255, 255))
+            screen.blit(info, (WIDTH // 2 - info.get_width() // 2, HEIGHT // 2 + 10))
+
+            # Draw "Back to Main Menu" button
+            pygame.draw.rect(screen, (255, 220, 100), back_button_rect, border_radius=12)
+            btn_text = small_font.render("Back to Main Menu", True, (80, 80, 80))
+            screen.blit(btn_text, (back_button_rect.centerx - btn_text.get_width() // 2, back_button_rect.centery - btn_text.get_height() // 2))
+
+        if player_car.score > highscore:
+            save_highscore(player_car.score)
+            highscore = player_car.score
 
         pygame.display.flip()
 

@@ -67,6 +67,68 @@ def load_highscore(filename="highscore.txt"):
     except:
         return 0
 
+def save_total_score(score, filename="total_score.txt"):
+    try:
+        total = load_total_score(filename)
+        with open(filename, "w") as f:
+            f.write(str(total + score))
+    except Exception as e:
+        print("Error saving total score:", e)
+
+def load_total_score(filename="total_score.txt"):
+    try:
+        with open(filename, "r") as f:
+            return int(f.read())
+    except:
+        return 0
+
+def car_selection_menu(screen, WIDTH, HEIGHT, car_images):
+    font = pygame.font.SysFont(None, 48)
+    small_font = pygame.font.SysFont(None, 32)
+    title = font.render("Select Your Car", True, (255, 255, 0))
+    clock = pygame.time.Clock()
+    selected = 0
+
+    # Calculate positions for car previews
+    positions = [
+        (WIDTH // 2 - 100, HEIGHT // 2),
+        (WIDTH // 2 + 100, HEIGHT // 2)
+    ]
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key in [pygame.K_LEFT, pygame.K_a]:
+                    selected = (selected - 1) % len(car_images)
+                elif event.key in [pygame.K_RIGHT, pygame.K_d]:
+                    selected = (selected + 1) % len(car_images)
+                elif event.key in [pygame.K_RETURN, pygame.K_SPACE]:
+                    return selected
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                for i, pos in enumerate(positions):
+                    rect = car_images[i].get_rect(center=pos)
+                    if rect.collidepoint(event.pos):
+                        return i
+
+        screen.fill((30, 30, 30))
+        screen.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 2 - 120))
+
+        for i, pos in enumerate(positions):
+            rect = car_images[i].get_rect(center=pos)
+            border_color = (255, 255, 255) if i == selected else (100, 100, 100)
+            pygame.draw.rect(screen, border_color, rect.inflate(10, 10), 3)
+            screen.blit(car_images[i], rect.topleft)
+            label = small_font.render(f"Car {i+1}", True, border_color)
+            screen.blit(label, (rect.centerx - label.get_width() // 2, rect.bottom + 10))
+
+        prompt = small_font.render("← → or click to select, Enter to confirm", True, (200, 200, 200))
+        screen.blit(prompt, (WIDTH // 2 - prompt.get_width() // 2, HEIGHT // 2 + 80))
+        pygame.display.flip()
+        clock.tick(60)
+
 def main():
     pygame.init()
 
@@ -79,58 +141,72 @@ def main():
     FPS = 60
 
     # Load map
-    city_map = pygame.image.load("city_map.png")
+    city_map = pygame.image.load("city_map2.png")
     city_map = pygame.transform.scale(city_map, (1600, 1200))
 
     # Load car image
-    car_image = pygame.image.load("car_sprite.png").convert_alpha()
-    car_image = pygame.transform.scale(car_image, (35, 45))  # Shorter car
+    car_image1 = pygame.image.load("car_sprite.png").convert_alpha()
+    car_image1 = pygame.transform.scale(car_image1, (40, 60))
+    car_image2 = pygame.image.load("car_sprite2.png").convert_alpha()
+    car_image2 = pygame.transform.scale(car_image2, (40, 60))
+    car_images = [car_image1, car_image2]
 
     # Car class
     class Car:
-        def __init__(self, x, y):
+        def __init__(self, x, y, image):
             self.x = x
             self.y = y
             self.angle = 0
-            self.movement_angle = 0  # For drifting
+            self.movement_angle = 0
             self.speed = 0
             self.velocity = pygame.math.Vector2(0.0, 0.0)
             self.max_speed = 5
-            self.acceleration = 0.2
-            self.friction = 0.05
-            self.turn_speed = 3
-            self.drift_factor = 0.15  # Lower = more drift
-            self.score = 0  # Add this line
+            self.acceleration = 0.12
+            self.friction = 0.06
+            self.turn_speed = 4.0  # Degrees per frame, adjust for faster/slower turning
+            self.drift_factor = 0.12
+            self.score = 0
+            self.image = image
 
         def update(self, drive_vector):
             if drive_vector.length() > 0.2:
-                self.speed += self.acceleration
-                # Set angle to match joycon direction (up is 0 degrees)
-                target_angle = -math.degrees(math.atan2(drive_vector.x, -drive_vector.y))
-                # Smoothly rotate movement_angle toward target_angle for drift
-                angle_diff = (target_angle - self.movement_angle + 180) % 360 - 180
-                self.movement_angle += angle_diff * self.drift_factor
-                self.angle = target_angle
+                # Calculate the target angle from joystick (up is 0 degrees)
+                target_angle = math.degrees(math.atan2(-drive_vector.y, drive_vector.x))
+                
+                # Smoothly turn car's facing angle toward target
+                turn_speed = 8.0  # degrees per frame
+                angle_diff = (target_angle - self.angle + 180) % 360 - 180
+                if abs(angle_diff) < turn_speed:
+                    self.angle = target_angle
+                else:
+                    self.angle += turn_speed * (1 if angle_diff > 0 else -1)
+                    self.angle %= 360
 
-                # --- Score for drifting ---
-                drift_amount = abs((self.angle - self.movement_angle + 180) % 360 - 180)
-                if drift_amount > 10 and self.speed > 1:  # Only score if drifting enough and moving
-                    self.score += int(drift_amount * 0.1)  # Adjust multiplier as desired
+                # Drift: movement_angle lags behind angle
+                drift_diff = (self.angle - self.movement_angle + 180) % 360 - 180
+                self.movement_angle += drift_diff * 0.12  # drift_factor
+
+                # Accelerate
+                self.speed += self.acceleration
+                self.speed = min(self.speed, self.max_speed)
+
+                # --- Drifting score ---
+                drift_amount = abs(drift_diff)
+                if drift_amount > 10 and self.speed > 1:
+                    self.score += int(drift_amount * 0.1)
             else:
                 if self.speed > 0:
                     self.speed -= self.friction
                 if self.speed < 0:
                     self.speed = 0
 
-            self.speed = min(self.speed, self.max_speed)
-            # Use movement_angle for velocity (drift effect)
+            # Move car in movement direction (not facing direction)
             self.velocity.from_polar((self.speed, -self.movement_angle))
             self.x += self.velocity.x
             self.y += self.velocity.y
 
         def draw(self, surface, offset_x, offset_y):
-            # Use self.angle for drawing (car faces where player steers)
-            rotated = pygame.transform.rotate(car_image, self.angle - 90)
+            rotated = pygame.transform.rotate(self.image, self.angle - 90)
             rect = rotated.get_rect(center=(self.x - offset_x, self.y - offset_y))
             surface.blit(rotated, rect.topleft)
 
@@ -152,7 +228,11 @@ def main():
                 self.active = False
                 self.drag_pos = None
             elif event.type == pygame.MOUSEMOTION and self.active:
-                self.drag_pos = pygame.Vector2(event.pos)
+                # Clamp drag_pos to stay within max_offset from center
+                vec = pygame.Vector2(event.pos) - self.center
+                if vec.length() > self.max_offset:
+                    vec.scale_to_length(self.max_offset)
+                self.drag_pos = self.center + vec
 
         def get_vector(self):
             if not self.active or self.drag_pos is None:
@@ -168,11 +248,16 @@ def main():
                 pygame.draw.circle(surface, (150, 150, 150), self.drag_pos, self.radius)
 
     # Setup
-    player_car = Car(800, 600)
+    player_car = Car(800, 600, car_image1)
     joycon = Joycon(center=pygame.Vector2(WIDTH // 2, HEIGHT - 80))
 
     # Show main menu
     show_main_menu(screen, WIDTH, HEIGHT)
+
+    # Car selection menu
+    selected_index = car_selection_menu(screen, WIDTH, HEIGHT, car_images)
+    car_image = car_images[selected_index]
+    player_car = Car(800, 600, car_image)
 
     # Example: List of house rectangles (x, y, width, height)
     houses = [
@@ -205,6 +290,7 @@ def main():
 
     # Load highscore
     highscore = load_highscore()
+    total_score = load_total_score()
 
     # Game loop
     running = True
@@ -218,10 +304,12 @@ def main():
                 if pause_button_rect.collidepoint(event.pos):
                     paused = not paused
                 elif paused and back_button_rect.collidepoint(event.pos):
-                    # Save highscore before returning to menu
+                    # Save highscore and total score before returning to menu
                     if player_car.score > highscore:
                         save_highscore(player_car.score)
                         highscore = player_car.score
+                    save_total_score(player_car.score)
+                    total_score = load_total_score()
                     show_main_menu(screen, WIDTH, HEIGHT)
                     paused = False
                 else:
@@ -257,6 +345,8 @@ def main():
         screen.blit(score_surf, (pause_button_rect.right + 10, pause_button_rect.top + (pause_button_rect.height - score_surf.get_height()) // 2))
         highscore_surf = font.render(f"High Score: {highscore}", True, (255, 255, 255))
         screen.blit(highscore_surf, (pause_button_rect.right + 10, pause_button_rect.bottom + 10))
+        total_score_surf = font.render(f"Total Score: {total_score}", True, (0, 255, 255))
+        screen.blit(total_score_surf, (pause_button_rect.right + 10, pause_button_rect.bottom + 40))
 
         # Draw pause button
         draw_pause_button(screen, pause_button_rect, paused)
